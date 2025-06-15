@@ -1,0 +1,16 @@
+[project]
+name = "microdi"
+version = "0.1.0"
+description = "Micro Dependency Injection Framework"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "mypy",
+    "isort",
+    "flake8",
+]
