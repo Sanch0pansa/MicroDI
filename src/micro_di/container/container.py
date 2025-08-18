@@ -1,0 +1,149 @@
+from abc import ABC
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Annotated, Any, Generic, ParamSpec, TypeVar, get_args, get_origin
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+Injectable = object()
+
+class DIRegistration(Generic[T]):
+    __concrete_type: type[T]
+    __dependencies: dict[str, type]
+    __instance: T | None
+
+    def __init__(self, concrete_type: type[T], instance: T | None = None) -> None:
+        self.__concrete_type = concrete_type
+        self.__instance = instance
+        self.__dependencies = {}
+
+    @property
+    def is_resolved(self) -> bool:
+        return self.__instance is not None
+
+    @property
+    def instance(self) -> T | None:
+        return self.__instance
+
+    @property
+    def concrete_type(self) -> type[T]:
+        return self.__concrete_type
+
+    @property
+    def dependencies(self) -> dict[str, type]:
+        return self.__dependencies
+
+    def set_instance(self, instance: T) -> None:
+        self.__instance = instance
+
+    def set_dependencies(self, dependencies: dict[str, Any]) -> None:
+        self.__dependencies = dependencies
+
+@dataclass
+class DIFactory(Generic[P, T]):
+    constructor: Callable[P, T]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+
+class DIContainer:
+    def __init__(self) -> None:
+        self.__registrations: dict[type, DIRegistration] = {}
+        self.__factories: dict[type, DIFactory] = {}
+
+    def register_instance(self, abstract_type: type[T], instance: T) -> None:
+        self.__registrations[abstract_type] = DIRegistration(concrete_type=abstract_type, instance=instance)
+
+    def register(self, abstract_type: type[T], concrete_type: type[T]) -> None:
+        self.__register_unresolved_type(abstract_type, concrete_type)
+
+    def register_factory(
+        self,
+        abstract_type: type[T],
+        constructor: Callable[P, T],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        self.__factories[abstract_type] = DIFactory(constructor=constructor, args=args, kwargs=kwargs)
+        self.__register_unresolved_type(abstract_type, abstract_type)
+
+    def __register_unresolved_type(self, abstract_type: type[T], concrete_type: type[T]) -> None:
+        if abstract_type in self.__registrations:
+            return
+
+        registration = self.__create_registration(concrete_type)
+        self.__registrations[abstract_type] = registration
+        for dep_type in registration.dependencies.values():
+            self.__register_unresolved_type(dep_type, dep_type)
+
+    def __get_injectable_attributes(self, cls: type) -> dict[str, Any]:
+        attributes: dict[str, Any] = {}
+        type_hints = getattr(cls, "__annotations__", {})
+        for name, annotation in type_hints.items():
+            origin = get_origin(annotation)
+            args = get_args(annotation)
+            if origin is Annotated and len(args) > 1:
+                marker = args[1]
+                if marker is Injectable:
+                    attributes[name] = args[0]
+    
+        return attributes
+
+    def __create_registration(self, concrete_type: type[T]) -> DIRegistration[T]:
+        injectable_attrs = self.__get_injectable_attributes(concrete_type)
+        registration = DIRegistration(concrete_type)
+        registration.set_dependencies(injectable_attrs)
+
+        return registration
+
+    def __create_instance(self, concrete_type: type[T]) -> T:
+        if concrete_type in self.__factories:
+            factory = self.__factories[concrete_type]
+            return factory.constructor(*factory.args, **factory.kwargs)
+
+        return concrete_type()
+
+    def resolve(self, abstract_type: type[T]) -> T:
+        if abstract_type not in self.__registrations:
+            self.register(abstract_type, abstract_type)
+        registration = self.__registrations[abstract_type]
+        if registration.instance is not None:
+            return registration.instance
+
+        if not registration.dependencies:
+            raise NoInjectableDependenciesError(registration.concrete_type)
+
+        instance = self.__create_instance(registration.concrete_type)
+        try:
+            for attr_name, dep_type in registration.dependencies.items():
+                setattr(instance, attr_name, self.resolve(dep_type))
+        except DIResolutionError as e:
+            raise UnresolvableDependencyError(registration.concrete_type) from e
+
+        registration.set_instance(instance)
+
+        return instance
+
+    @property
+    def registrations(self) -> dict[type, DIRegistration]:
+        return self.__registrations
+
+class IRepo(ABC):
+    pass
+
+class DatabaseManager:
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+class SQLRepo(IRepo):
+    database_manager: Annotated[DatabaseManager, Injectable]
+
+class Service:
+    repo: Annotated[IRepo, Injectable]
+
+class Controller:
+    service: Annotated[Service, Injectable]
+
+di = DIContainer()
+di.register(IRepo, SQLRepo)
+controller = di.resolve(Controller)
