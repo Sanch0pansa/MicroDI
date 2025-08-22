@@ -1,4 +1,4 @@
-from typing import Generic
+from typing import Generic, Any
 from .types import T
 
 

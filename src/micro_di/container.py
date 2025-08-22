@@ -1,50 +1,24 @@
 from abc import ABC
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Annotated, Any, Generic, ParamSpec, TypeVar, get_args, get_origin
+from typing import Annotated, Any, Generic, get_args, get_origin
 
-P = ParamSpec("P")
-T = TypeVar("T")
+from .exceptions import (
+    DIResolutionError,
+    NoInjectableDependenciesError,
+    UnresolvableDependencyError,
+)
+from .injectable import Injectable
+from .registrations import DIRegistration
+from .types import P, T
 
-Injectable = object()
-
-class DIRegistration(Generic[T]):
-    __concrete_type: type[T]
-    __dependencies: dict[str, type]
-    __instance: T | None
-
-    def __init__(self, concrete_type: type[T], instance: T | None = None) -> None:
-        self.__concrete_type = concrete_type
-        self.__instance = instance
-        self.__dependencies = {}
-
-    @property
-    def is_resolved(self) -> bool:
-        return self.__instance is not None
-
-    @property
-    def instance(self) -> T | None:
-        return self.__instance
-
-    @property
-    def concrete_type(self) -> type[T]:
-        return self.__concrete_type
-
-    @property
-    def dependencies(self) -> dict[str, type]:
-        return self.__dependencies
-
-    def set_instance(self, instance: T) -> None:
-        self.__instance = instance
-
-    def set_dependencies(self, dependencies: dict[str, Any]) -> None:
-        self.__dependencies = dependencies
 
 @dataclass
 class DIFactory(Generic[P, T]):
     constructor: Callable[P, T]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
+
 
 class DIContainer:
     def __init__(self) -> None:
