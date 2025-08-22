@@ -101,23 +101,3 @@ class DIContainer:
     @property
     def registrations(self) -> dict[type, DIRegistration]:
         return self.__registrations
-
-class IRepo(ABC):
-    pass
-
-class DatabaseManager:
-    def __init__(self, url: str) -> None:
-        self.url = url
-
-class SQLRepo(IRepo):
-    database_manager: Annotated[DatabaseManager, Injectable]
-
-class Service:
-    repo: Annotated[IRepo, Injectable]
-
-class Controller:
-    service: Annotated[Service, Injectable]
-
-di = DIContainer()
-di.register(IRepo, SQLRepo)
-controller = di.resolve(Controller)
