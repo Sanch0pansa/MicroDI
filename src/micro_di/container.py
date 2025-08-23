@@ -1,4 +1,3 @@
-from abc import ABC
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, Any, Generic, get_args, get_origin
@@ -84,7 +83,10 @@ class DIContainer:
         if registration.instance is not None:
             return registration.instance
 
-        if not registration.dependencies:
+        if (
+            not registration.dependencies and
+            abstract_type not in self.__factories
+        ):
             raise NoInjectableDependenciesError(registration.concrete_type)
 
         instance = self.__create_instance(registration.concrete_type)
