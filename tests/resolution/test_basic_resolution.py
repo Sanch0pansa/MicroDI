@@ -1,9 +1,10 @@
 from src.micro_di import DIContainer, Injectable, UnresolvableDependencyError
 from typing import Annotated
+from abc import ABC, abstractmethod
 import pytest
 
 
-class IRepo:
+class IRepo(ABC):
     pass
 
 
@@ -17,8 +18,10 @@ class Service:
     repo: Annotated[IRepo, Injectable]
 
 
-class IController:
-    pass
+class IController(ABC):
+    @abstractmethod
+    def some_func(self):
+        pass
 
 
 class EventConsumer:
@@ -35,10 +38,16 @@ class MQController(IController):
     service: Annotated[Service, Injectable]
     event_consumer: Annotated[EventConsumer, Injectable]
 
+    def some_func(self):
+        pass
+
 
 class RESTController(IController):
     service: Annotated[Service, Injectable]
     api_router: Annotated[APIRouter, Injectable]
+
+    def some_func(self):
+        pass
 
 
 class App:
