@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from inspect import isabstract
-from typing import Annotated, Any, Generic, get_args, get_origin
+from typing import Annotated, Any, Generic, get_args, get_origin, cast
 
 from .exceptions import (
     DIResolutionError,
@@ -47,11 +47,27 @@ class DIContainer:
         **kwargs: P.kwargs,
     ) -> None:
         self.__factories[abstract_type] = DIFactory(constructor=constructor, args=args, kwargs=kwargs)
-        self.__create_registration(abstract_type, abstract_type)
+        self.__create_registration(abstract_type, cast(type[T], constructor))
 
-    def __get_injectable_attributes(self, cls: type) -> dict[str, Any]:
+    def __create_instance(self, concrete_type: type[T], abstract_type: type) -> T:
+        if abstract_type in self.__factories:
+            factory = self.__factories[abstract_type]
+            return factory.constructor(*factory.args, **factory.kwargs)
+
+        if isabstract(concrete_type):
+            raise NoRegisteredImplementationsError(concrete_type)
+
+        try:
+            return concrete_type()
+        except TypeError as e:
+            raise UnresolvableDependencyError(concrete_type) from e
+    
+    def __get_injectable_attributes(
+        self,
+        class_to_inspect: type,
+    ) -> dict[str, Any]:
         attributes: dict[str, Any] = {}
-        type_hints = getattr(cls, "__annotations__", {})
+        type_hints = class_to_inspect.__annotations__
         for name, annotation in type_hints.items():
             origin = get_origin(annotation)
             args = get_args(annotation)
@@ -62,21 +78,6 @@ class DIContainer:
     
         return attributes
 
-    def __create_instance(self, concrete_type: type[T]) -> T:
-        if concrete_type in self.__factories:
-            factory = self.__factories[concrete_type]
-            return factory.constructor(*factory.args, **factory.kwargs)
-
-
-        print(concrete_type, isabstract(concrete_type))
-        if isabstract(concrete_type):
-            raise NoRegisteredImplementationsError(concrete_type)
-
-        try:
-            return concrete_type()
-        except TypeError as e:
-            raise UnresolvableDependencyError(concrete_type) from e
-    
     def __define_registration_dependencies(
         self,
         registration: DIRegistration,
@@ -104,7 +105,7 @@ class DIContainer:
             return registration.instance
 
         self.__define_registration_dependencies(registration)
-        instance = self.__create_instance(registration.concrete_type)
+        instance = self.__create_instance(registration.concrete_type, abstract_type)
         self.__resolve_dependencies_for_registration(registration, instance)
 
         registration.set_instance(instance)
