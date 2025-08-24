@@ -23,12 +23,20 @@ class DIContainer:
     def __init__(self) -> None:
         self.__registrations: dict[type, DIRegistration] = {}
         self.__factories: dict[type, DIFactory] = {}
+        
+    def __create_registration(
+        self,
+        abstract_type: type[T],
+        concrete_type: type[T],
+        instance: T | None = None,
+    ) -> None:
+        self.__registrations[abstract_type] = DIRegistration(concrete_type=concrete_type, instance=instance)
 
     def register_instance(self, abstract_type: type[T], instance: T) -> None:
-        self.__registrations[abstract_type] = DIRegistration(concrete_type=abstract_type, instance=instance)
+        self.__create_registration(abstract_type, abstract_type, instance)
 
     def register(self, abstract_type: type[T], concrete_type: type[T]) -> None:
-        self.__register_unresolved_type(abstract_type, concrete_type)
+        self.__create_registration(abstract_type, concrete_type)
 
     def register_factory(
         self,
@@ -38,16 +46,7 @@ class DIContainer:
         **kwargs: P.kwargs,
     ) -> None:
         self.__factories[abstract_type] = DIFactory(constructor=constructor, args=args, kwargs=kwargs)
-        self.__register_unresolved_type(abstract_type, abstract_type)
-
-    def __register_unresolved_type(self, abstract_type: type[T], concrete_type: type[T]) -> None:
-        if abstract_type in self.__registrations:
-            return
-
-        registration = self.__create_registration(concrete_type)
-        self.__registrations[abstract_type] = registration
-        for dep_type in registration.dependencies.values():
-            self.__register_unresolved_type(dep_type, dep_type)
+        self.__create_registration(abstract_type, abstract_type)
 
     def __get_injectable_attributes(self, cls: type) -> dict[str, Any]:
         attributes: dict[str, Any] = {}
@@ -62,37 +61,52 @@ class DIContainer:
     
         return attributes
 
-    def __create_registration(self, concrete_type: type[T]) -> DIRegistration[T]:
-        injectable_attrs = self.__get_injectable_attributes(concrete_type)
-        registration = DIRegistration(concrete_type)
-        registration.set_dependencies(injectable_attrs)
-
-        return registration
-
     def __create_instance(self, concrete_type: type[T]) -> T:
         if concrete_type in self.__factories:
             factory = self.__factories[concrete_type]
             return factory.constructor(*factory.args, **factory.kwargs)
 
         return concrete_type()
+    
+    def __define_registration_dependencies(
+        self,
+        registration: DIRegistration,
+    ) -> None:
+        injectable_attrs = self.__get_injectable_attributes(registration.concrete_type)
+        registration.set_dependencies(injectable_attrs)
+
+    def __ensure_existence_of_injectable_dependencies(
+        self,
+        registration: DIRegistration,
+    ) -> None:
+        if (
+            not registration.dependencies and
+            registration.concrete_type not in self.__factories
+        ):
+            raise NoInjectableDependenciesError(registration.concrete_type)
+    
+    def __resolve_dependencies_for_registration(
+        self,
+        registration: DIRegistration,
+        instance: T,
+    ) -> None:
+        for attr_name, dep_type in registration.dependencies.items():
+            setattr(instance, attr_name, self.resolve(dep_type))
 
     def resolve(self, abstract_type: type[T]) -> T:
         if abstract_type not in self.__registrations:
             self.register(abstract_type, abstract_type)
+
         registration = self.__registrations[abstract_type]
         if registration.instance is not None:
             return registration.instance
 
-        if (
-            not registration.dependencies and
-            abstract_type not in self.__factories
-        ):
-            raise NoInjectableDependenciesError(registration.concrete_type)
+        self.__define_registration_dependencies(registration)
+        self.__ensure_existence_of_injectable_dependencies(registration)
 
         instance = self.__create_instance(registration.concrete_type)
         try:
-            for attr_name, dep_type in registration.dependencies.items():
-                setattr(instance, attr_name, self.resolve(dep_type))
+            self.__resolve_dependencies_for_registration(registration, instance)
         except DIResolutionError as e:
             raise UnresolvableDependencyError(registration.concrete_type) from e
 
